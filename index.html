@@ -1,0 +1,1414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A Day in the Water</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&display=swap">
+<style>
+  /* Layout: one full-bleed canvas; the only text is the night card at the start and the end,
+     plus a small sound toggle in the corner.
+     The pond is a single, deliberately pale world, so it keeps the same look in light and dark themes. */
+  :root {
+    --pond-milk:  #f4f9f7;
+    --pond-aqua:  #cdeeed;
+    --pond-light: #b3e2e2;
+    --night:      #000000;
+    --ink:        rgba(238, 246, 243, 0.92);
+    --ink-soft:   rgba(238, 246, 243, 0.62);
+    --line-soft:  rgba(238, 246, 243, 0.28);
+    --line-hover: rgba(238, 246, 243, 0.55);
+    --chip:       rgba(22, 56, 62, 0.20);
+    --chip-ink:   rgba(255, 255, 255, 0.88);
+    --font-display: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', Georgia, serif;
+    color-scheme: light;
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    /* Shown only if WebGL is unavailable. */
+    background: radial-gradient(circle at 25% 12%, var(--pond-milk), var(--pond-aqua) 60%, var(--pond-light));
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #pond {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    touch-action: none;
+    cursor: default;
+    background: var(--night);
+  }
+
+  /* Night cards (start and end look the same) */
+  .card {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.4rem;
+    padding-inline: 16px;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 2.6s ease;
+  }
+  .card.show { opacity: 1; }
+  /* Leaving: the whole card fades out slowly while its text stays as it was */
+  .card.leaving { opacity: 0; transition: opacity 3s ease-in-out; }
+  .card.leaving .card-btn { pointer-events: none; }
+  /* The tap prompt is plain text; tapping anywhere works */
+  .card-btn {
+    font-family: var(--font-display);
+    font-size: clamp(1rem, 2.6vw, 1.35rem);
+    letter-spacing: 0.06em;
+    line-height: 1.5;
+    text-wrap: balance;
+    color: var(--ink);
+    background: transparent;
+    border: 0;
+    padding: 0.5em 0.25em;
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    transition: opacity 2s ease, transform 2s ease, color 0.4s ease;
+  }
+  .card.ready .card-btn { opacity: 1; transform: none; pointer-events: auto; animation: breathe 4.5s ease-in-out 2s infinite; }
+  .card-btn:hover { color: #fff; }
+  .card-btn:focus-visible { outline: 1px solid var(--line-hover); outline-offset: 6px; border-radius: 4px; }
+  @keyframes breathe { 50% { opacity: 0.55; } }
+
+  /* Sound toggle */
+  .sound {
+    position: fixed;
+    right: calc(16px + env(safe-area-inset-right, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--chip);
+    color: var(--chip-ink);
+    cursor: pointer;
+    opacity: 0.5;
+    transition: opacity 0.4s ease;
+  }
+  .sound:hover, .sound:focus-visible { opacity: 0.9; }
+  .sound:focus-visible { outline: 1px solid var(--chip-ink); outline-offset: 3px; }
+  .sound[hidden] { display: none; }
+  .sound .cross { display: none; }
+  .sound.muted .waves { display: none; }
+  .sound.muted .cross { display: inline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card, .card-btn { transition-duration: 0.6s; }
+    .card.ready .card-btn { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="pond" aria-label="A pond through one day. Tap or drag across the water to make ripples."></canvas>
+<div class="card" id="start">
+  <button class="card-btn" id="startBtn" type="button" tabindex="-1">Tap to start a new 2 minute day in the water</button>
+</div>
+<div class="card" id="end" aria-live="polite">
+  <button class="card-btn" id="again" type="button" tabindex="-1">Tap to start a new 2 minute day in the water</button>
+</div>
+<button class="sound" id="sound" type="button" aria-label="Mute sound" hidden>
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <path d="M4 9.5h3.2L11.5 6v12l-4.3-3.5H4z" fill="currentColor"/>
+    <path class="waves" d="M14.5 9.5a3.4 3.4 0 0 1 0 5M17 7.2a6.6 6.6 0 0 1 0 9.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <path class="cross" d="M15 9.5l5 5M20 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+  </svg>
+</button>
+
+<script>
+(() => {
+  'use strict';
+
+  // =====================================================================
+  //  TWEAK HERE
+  // =====================================================================
+
+  const DAY = {
+    seconds:   120,    // length of the whole day, dawn to night
+    fadeIn:    3.0,    // seconds to fade up from black at the start
+    nightFrom: 0.86,   // fraction of the day when the fade to black begins
+    nightAt:   0.95,   // fraction of the day when it is fully black
+    buttonDelay: 1.0,  // seconds of black before "Tap to start..." fades in
+  };
+
+  // The palette through the day. Noon is the "water kids" reference; every other
+  // time is a tint of it. t = fraction of the day. hl = ripple highlight, spark = glints.
+  const DAY_KEYS = [
+    { t: 0.00, milk: '#c9d3d6', aqua: '#a9bcc4', light: '#8fa6b2', mint: '#a3b8b4', teal: '#6f8c99', sun: '#e6e2e4', hl: 0.35, spark: 0.2 }, // dawn
+    { t: 0.10, milk: '#f6ece6', aqua: '#cfe0e0', light: '#b2cfd3', mint: '#c4dccc', teal: '#85aeb5', sun: '#ffe3cc', hl: 0.75, spark: 0.6 }, // sunrise
+    { t: 0.22, milk: '#f6f6ef', aqua: '#d2ecea', light: '#b5dfe0', mint: '#c0e4d0', teal: '#86bcc0', sun: '#fff4e2', hl: 0.90, spark: 0.9 }, // morning
+    { t: 0.42, milk: '#f4f9f7', aqua: '#cdeeed', light: '#b3e2e2', mint: '#bfe6d2', teal: '#86bfc2', sun: '#fffbef', hl: 1.00, spark: 1.0 }, // noon
+    { t: 0.62, milk: '#f7f5e8', aqua: '#d3eadc', light: '#b9dccf', mint: '#cde5c2', teal: '#8cb9b0', sun: '#fff1d2', hl: 0.95, spark: 0.9 }, // afternoon
+    { t: 0.78, milk: '#f9e6da', aqua: '#e6d6d4', light: '#c9c4cc', mint: '#dcd8c4', teal: '#9aa7b2', sun: '#ffd9bd', hl: 0.85, spark: 0.7 }, // sunset
+    { t: 0.88, milk: '#b9bfc8', aqua: '#94a6b3', light: '#7a8e9e', mint: '#8fa3a3', teal: '#5e7585', sun: '#e8cfc6', hl: 0.40, spark: 0.3 }, // dusk
+  ];
+
+  // The sun's soft arc across the pond, as fractions of the screen (y = 1 is the top).
+  const SUN_PATH = {
+    rise: 0.02,  set: 0.88,     // day fractions when it enters and leaves
+    xFrom: -0.05, xTo: 1.05,    // drifts left to right
+    yLow: 0.25,  yHigh: 0.85,   // low at the edges of the day, high at noon
+  };
+
+  // When things happen, as fractions of the day (120 s: 0.1 = 12 s). Same every day.
+  const EVENTS = {
+    mistUntil:     0.15,  // dawn mist has burned off by here
+    fishFrom:      0.18,  // two lone fish swim in...
+    fishUntil:     0.48,  // ...and swim away
+    showerAt:      0.46,  // a brief sun shower...
+    showerSeconds: 11,    // ...this long
+    schoolAt:      0.55,  // a school of fish crosses the pond...
+    schoolSeconds: 34,    // ...taking this long
+    schoolCount:   12,
+    birdAt:        0.75,  // a bird's shadow passes over...
+    birdSeconds:   9,     // ...taking this long
+  };
+
+  const SOUND = {
+    volume: 0.6,    // overall
+    water:  1.0,    // the hush of shallow water and its little laps and trickles
+    birds:  1.0,    // birdsong: busiest in the morning, quiet by dusk, none at night
+  };
+
+  const TUNE = {
+    // --- Ripple size & feel ---
+    tapRadius:      0.018,  // ripple size from a tap, as a fraction of the screen's longer side
+    tapStrength:    1.0,    // how deep a tap pushes the water
+    dragRadius:     0.012,  // width of the wake left by a drag
+    dragStrength:   0.16,   // push per wake "stamp" while dragging
+    dragSpeedBoost: 0.6,    // extra energy for faster drags (0 = speed doesn't matter)
+
+    // --- Decay / settling ---
+    damping:        0.992,  // per sim step; lower settles faster (0.98–0.997)
+    waveSpeed:      0.32,   // how fast ripples travel (keep <= 0.5)
+    edgeSponge:     0.10,   // band near the edges that quietly absorbs ripples
+
+    // --- Simulation detail ---
+    gridMax:        320,    // sim cells along the longer side (higher = finer ripples, more CPU)
+    stepsPerSecond: 120,
+
+    // --- Look: painterly softness & texture ---
+    refraction:     0.035,  // how much ripples bend the view of the pond floor
+    highlight:      1.0,    // brightness of light catching ripple crests (multiplies the day's value)
+    painterly:      1.0,    // strength of the soft painted washes on the pond floor
+    strokes:        1.0,    // the faint white hand-drawn lines on the surface
+    sparkles:       1.0,    // tiny twinkling glints (multiplies the day's value)
+    grain:          0.022,  // paper texture
+    fishSoftness:   0.24,   // blur of the fish shadows (fraction of a fish's length)
+    fishShade:      0.40,   // how dark the fish shadows are
+
+    // --- Frame rate ---
+    fps:            24,     // drawn frames per second; low values give a hand-animated feel (60 = smooth)
+
+    // --- Idle life ---
+    ambientDrops:   true,   // an occasional faint drop while nobody is touching
+  };
+
+  // =====================================================================
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const canvas = document.getElementById('pond');
+  const endEl = document.getElementById('end');
+  const againBtn = document.getElementById('again');
+  const startEl = document.getElementById('start');
+  const startBtn = document.getElementById('startBtn');
+  const soundBtn = document.getElementById('sound');
+  const gl = canvas.getContext('webgl', {
+    antialias: false, alpha: false, depth: false, stencil: false,
+    premultipliedAlpha: false, powerPreference: 'low-power',
+  });
+  if (!gl) return; // the CSS gradient stays as a still pond
+
+  // ---------------------------------------------------------------------
+  // Shaders
+  // ---------------------------------------------------------------------
+  const VERT = `
+    attribute vec2 aPos;
+    varying vec2 vUv;
+    void main() {
+      vUv = aPos * 0.5 + 0.5;
+      gl_Position = vec4(aPos, 0.0, 1.0);
+    }`;
+
+  const FRAG = `
+    #ifdef GL_FRAGMENT_PRECISION_HIGH
+    precision highp float;
+    #else
+    precision mediump float;
+    #endif
+
+    uniform sampler2D uSim;    // r,g = ripple slope, b = height
+    uniform sampler2D uUnder;  // things under the surface: fish, shadows
+    uniform sampler2D uMist;   // where the mist hasn't been wiped away
+    uniform vec2  uRes;
+    uniform float uAspect;
+    uniform float uTime;
+    uniform vec2  uSunPos;     // where the sunlit patch sits (world space)
+    uniform vec2  uSunDir;     // which way ripple crests catch the light
+    uniform float uFade;       // 0 = black, 1 = full daylight
+    uniform float uMistAmt, uRain;
+    uniform float uRefract, uHighlight, uPaint, uStrokes, uSparkles, uGrain;
+    uniform vec3  cMilk, cAqua, cLight, cMint, cTeal, cSun;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+      p = fract(p * vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      float a = hash(i), b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
+      return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+      for (int i = 0; i < 4; i++) { v += a * noise(p); p = m * p; a *= 0.5; }
+      return v;
+    }
+
+    // The pond floor: sunlit gradient with soft watercolour washes and faint caustics.
+    vec3 pondFloor(vec2 p, float t) {
+      float L = smoothstep(1.3, 0.0, length(p - uSunPos));
+      vec3 col = mix(cLight, cAqua, L);
+      col = mix(col, cMilk, smoothstep(0.45, 1.0, L) * 0.65);
+
+      vec2 w = p * 1.6 + vec2(0.0, t * 0.004);
+      float n1 = fbm(w + fbm(w * 0.7 + 3.1) * 0.8);
+      float wash = smoothstep(0.50, 0.56, n1);
+      float rim  = smoothstep(0.50, 0.53, n1) - smoothstep(0.53, 0.60, n1); // pigment gathers at the edge
+      col = mix(col, cMint, wash * 0.45 * uPaint);
+      col = mix(col, cTeal, rim * 0.16 * uPaint);
+
+      float n2 = fbm(p * 3.2 - 7.3);
+      col = mix(col, cTeal, smoothstep(0.58, 0.63, n2) * 0.14 * uPaint);
+
+      float c1 = noise(p * 6.0 + vec2(t * 0.11, -t * 0.08));
+      float c2 = noise(p * 8.2 + vec2(-t * 0.07, t * 0.10) + 4.0);
+      float caustic = pow(1.0 - abs(c1 - c2), 12.0);
+      col += cSun * caustic * 0.10 * mix(0.4, 1.0, L);
+      return col;
+    }
+
+    void main() {
+      vec2 simUv = vec2(vUv.x, 1.0 - vUv.y);       // sim and layers run top to bottom
+      vec2 q = vec2(vUv.x * uAspect, vUv.y);        // world space, height = 1
+      float t = uTime;
+
+      // Ripples from touch
+      vec4 s = texture2D(uSim, simUv);
+      vec2 grad = (s.rg - 0.5) * 2.0;
+      grad.y = -grad.y;
+      float h = (s.b - 0.5) * 2.0;
+
+      // A very gentle ambient swell so the pond breathes when idle
+      float ph = noise(q * 2.5 + t * 0.03) * 3.0;
+      vec2 amb = vec2(0.6, 0.8) * sin(dot(q, vec2(0.6, 0.8)) * 9.0 + t * 0.55 + ph)
+               + vec2(-0.7, 0.7) * sin(dot(q, vec2(-0.7, 0.7)) * 13.0 - t * 0.40 + ph) * 0.6
+               + vec2(0.95, -0.3) * sin(dot(q, vec2(0.95, -0.3)) * 17.0 + t * 0.70) * 0.4;
+      vec2 n = grad + amb * 0.05;
+
+      // Look through the moving surface at the floor
+      vec2 off = n * uRefract;
+      vec3 col = pondFloor(q + off, t);
+      float L = smoothstep(1.3, 0.0, length(q - uSunPos));
+
+      // Fish shadows under the surface, bent by the ripples
+      vec2 uOff = off * 1.4;
+      vec4 under = texture2D(uUnder, vec2(simUv.x + uOff.x / uAspect, simUv.y - uOff.y));
+      col = mix(col, under.rgb, under.a);
+
+      // Light catching the ripple crests, soft shade on the far side
+      float slope = dot(grad, uSunDir);
+      float lit   = smoothstep(0.15, 0.55, slope);
+      float shade = smoothstep(0.15, 0.60, -slope);
+      col = mix(col, cSun, lit * 0.75 * uHighlight);
+      col = mix(col, cTeal, shade * 0.20);
+      col += cSun * smoothstep(0.0, 0.6, abs(h)) * 0.05;   // disturbed water glows faintly
+
+      // Hand-drawn white strokes drifting on the surface (they bend with ripples)
+      vec2 lq = q * vec2(1.6, 4.0) + off * 6.0 + vec2(t * 0.015, 0.0);
+      float A = fbm(lq);
+      float lmask = smoothstep(0.45, 0.70, noise(q * 2.3 + 11.0 + t * 0.01));
+      float strokeW = 1.0 - smoothstep(0.0, 0.018, abs(A - 0.50));
+      float strokeT = 1.0 - smoothstep(0.0, 0.012, abs(A - 0.38));
+      col = mix(col, mix(cSun, vec3(1.0), 0.5), strokeW * lmask * 0.40 * uStrokes);
+      col = mix(col, cTeal, strokeT * lmask * 0.10 * uStrokes);
+
+      // Tiny glints that twinkle, brighter where ripples catch the sun (and in the rain)
+      vec2 sp = q * 55.0;
+      vec2 id = floor(sp);
+      float r = hash(id);
+      if (r > 0.97 - uRain * 0.02) {
+        vec2 c = id + 0.5 + (vec2(hash(id + 1.7), hash(id + 3.1)) - 0.5) * 0.6;
+        float tw = pow(max(0.0, sin(t * (0.6 + r * 1.5 + uRain * 2.0) + r * 80.0)), 6.0);
+        float spark = smoothstep(0.22, 0.0, length(sp - c)) * tw * (0.35 + lit * 1.2 + L * 0.3);
+        col = mix(col, mix(cSun, vec3(1.0), 0.6), clamp(spark, 0.0, 1.0) * 0.85 * uSparkles * (1.0 + uRain));
+      }
+      col = mix(col, cLight, uRain * 0.08);
+
+      // Dawn mist, wiped away where you touch
+      if (uMistAmt > 0.001) {
+        float m = texture2D(uMist, simUv).a * uMistAmt;
+        float wisp = fbm(q * 2.2 + vec2(t * 0.035, t * 0.012));
+        float dens = m * (0.25 + 0.75 * smoothstep(0.3, 0.75, wisp));
+        col = mix(col, mix(cMilk, vec3(0.93, 0.95, 0.97), 0.4), dens * 0.78);
+      }
+
+      // Soft vignette and paper grain
+      float v = length(vUv - 0.5);
+      col = mix(col, cLight, smoothstep(0.45, 0.85, v) * 0.25);
+      col += (hash(floor(gl_FragCoord.xy)) - 0.5) * uGrain;
+      col += (noise(q * 140.0) - 0.5) * uGrain * 0.8;
+      col *= uFade;
+
+      gl_FragColor = vec4(col, 1.0);
+    }`;
+
+  // ---------------------------------------------------------------------
+  // GL setup
+  // ---------------------------------------------------------------------
+  let prog, uni = {}, simTex, underTex, mistTex;
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(sh));
+      return null;
+    }
+    return sh;
+  }
+
+  function hexToVec3(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+  }
+
+  function makeTexture(unit) {
+    const t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    return t;
+  }
+
+  function initGL() {
+    const vs = compile(gl.VERTEX_SHADER, VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, FRAG);
+    if (!vs || !fs) return false;
+    prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.error(gl.getProgramInfoLog(prog));
+      return false;
+    }
+    gl.useProgram(prog);
+
+    // One triangle that covers the screen
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+
+    const names = ['uSim', 'uUnder', 'uMist', 'uRes', 'uAspect', 'uTime', 'uSunPos', 'uSunDir',
+      'uFade', 'uMistAmt', 'uRain', 'uRefract', 'uHighlight', 'uPaint', 'uStrokes', 'uSparkles',
+      'uGrain', 'cMilk', 'cAqua', 'cLight', 'cMint', 'cTeal', 'cSun'];
+    for (const n of names) uni[n] = gl.getUniformLocation(prog, n);
+
+    gl.uniform1i(uni.uSim, 0);
+    gl.uniform1i(uni.uUnder, 1);
+    gl.uniform1i(uni.uMist, 3);
+    gl.uniform1f(uni.uRefract, TUNE.refraction);
+    gl.uniform1f(uni.uPaint, TUNE.painterly);
+    gl.uniform1f(uni.uStrokes, TUNE.strokes);
+    gl.uniform1f(uni.uGrain, TUNE.grain);
+
+    simTex = makeTexture(0);
+    underTex = makeTexture(1);
+    mistTex = makeTexture(3);
+    texSize = '';
+    return true;
+  }
+
+  function uploadCanvas(unit, texture, source) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  }
+
+  // ---------------------------------------------------------------------
+  // Ripple simulation (a small height field, stepped on the CPU)
+  // ---------------------------------------------------------------------
+  let W = 1, H = 1, cols = 0, rows = 0;
+  let hA = null, vA = null, sponge = null, texData = null, texSize = '';
+  let asleep = true;
+  const SLOPE_GAIN = 3.0;
+
+  // 2D layers for fish and the mist (drawn in CSS pixels, scaled down)
+  const under = document.createElement('canvas'), uctx = under.getContext('2d');
+  const mist = document.createElement('canvas'), mctx = mist.getContext('2d');
+  let LS = 1, MS = 1;   // layer scale, mist scale
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    let dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const maxPixels = 2.6e6; // keeps weaker phones smooth
+    if (W * H * dpr * dpr > maxPixels) dpr = Math.sqrt(maxPixels / (W * H));
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    const cell = Math.max(W, H) / TUNE.gridMax;
+    const nc = Math.max(8, Math.round(W / cell));
+    const nr = Math.max(8, Math.round(H / cell));
+    const nh = new Float32Array(nc * nr), nv = new Float32Array(nc * nr);
+
+    // Carry the current water over so a resize doesn't wipe the ripples
+    if (hA) {
+      for (let y = 0; y < nr; y++) {
+        const oy = Math.min(rows - 1, Math.floor(y * rows / nr));
+        for (let x = 0; x < nc; x++) {
+          const ox = Math.min(cols - 1, Math.floor(x * cols / nc));
+          nh[y * nc + x] = hA[oy * cols + ox];
+          nv[y * nc + x] = vA[oy * cols + ox];
+        }
+      }
+    }
+    cols = nc; rows = nr; hA = nh; vA = nv;
+    texData = new Uint8Array(cols * rows * 4);
+
+    // Edge sponge: ripples fade out near the shore instead of bouncing back
+    sponge = new Float32Array(cols * rows);
+    const band = Math.max(4, TUNE.edgeSponge * Math.min(cols, rows));
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const d = Math.min(x, y, cols - 1 - x, rows - 1 - y);
+        const k = d < band ? 1 - d / band : 0;
+        sponge[y * cols + x] = 1 - 0.06 * k * k;
+      }
+    }
+
+    // Layers
+    LS = Math.max(0.5, Math.min(1, 900 / Math.max(W, H)));
+    under.width = Math.max(2, Math.round(W * LS));
+    under.height = Math.max(2, Math.round(H * LS));
+    MS = 160 / Math.max(W, H);
+    const mw = Math.max(2, Math.round(W * MS)), mh = Math.max(2, Math.round(H * MS));
+    if (mist.width !== mw || mist.height !== mh) {
+      mist.width = mw; mist.height = mh;
+      resetMist();
+    }
+    layersDirty = true;
+
+    gl.uniform2f(uni.uRes, canvas.width, canvas.height);
+    gl.uniform1f(uni.uAspect, W / H);
+    upload();
+  }
+
+  function step() {
+    const c2 = TUNE.waveSpeed, damp = TUNE.damping;
+    for (let y = 1; y < rows - 1; y++) {
+      let i = y * cols + 1;
+      for (let x = 1; x < cols - 1; x++, i++) {
+        const lap = hA[i - 1] + hA[i + 1] + hA[i - cols] + hA[i + cols] - 4 * hA[i];
+        vA[i] = (vA[i] + lap * c2) * damp * sponge[i];
+      }
+    }
+    let energy = 0;
+    for (let i = 0, n = hA.length; i < n; i++) {
+      hA[i] = (hA[i] + vA[i]) * 0.9995 * sponge[i];
+      energy += Math.abs(vA[i]);
+    }
+    if (energy / hA.length < 2e-6) asleep = true;
+  }
+
+  function upload() {
+    let k = 0;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = y * cols + x;
+        const xl = x > 0 ? i - 1 : i, xr = x < cols - 1 ? i + 1 : i;
+        const yu = y > 0 ? i - cols : i, yd = y < rows - 1 ? i + cols : i;
+        const gx = (hA[xr] - hA[xl]) * SLOPE_GAIN;
+        const gy = (hA[yd] - hA[yu]) * SLOPE_GAIN;
+        texData[k++] = 128 + Math.max(-127, Math.min(127, gx * 127));
+        texData[k++] = 128 + Math.max(-127, Math.min(127, gy * 127));
+        texData[k++] = 128 + Math.max(-127, Math.min(127, hA[i] * 127));
+        texData[k++] = 255;
+      }
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, simTex);
+    const size = cols + 'x' + rows;
+    if (size !== texSize) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, cols, rows, 0, gl.RGBA, gl.UNSIGNED_BYTE, texData);
+      texSize = size;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cols, rows, gl.RGBA, gl.UNSIGNED_BYTE, texData);
+    }
+  }
+
+  // Press the water down with a soft round "finger" at a screen position (CSS px)
+  function disturb(px, py, radiusPx, strength) {
+    const sx = cols / W, sy = rows / H;
+    const cx = px * sx, cy = py * sy;
+    const r = Math.max(1.5, radiusPx * sx);
+    const R = Math.ceil(r * 2.5);
+    const x0 = Math.max(1, Math.floor(cx - R)), x1 = Math.min(cols - 2, Math.ceil(cx + R));
+    const y0 = Math.max(1, Math.floor(cy - R)), y1 = Math.min(rows - 2, Math.ceil(cy + R));
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const d2 = ((x - cx) * (x - cx) + (y - cy) * (y - cy)) / (r * r);
+        if (d2 < 6.25) hA[y * cols + x] -= strength * Math.exp(-d2);
+      }
+    }
+    asleep = false;
+  }
+
+  // ---------------------------------------------------------------------
+  // The day
+  // ---------------------------------------------------------------------
+  const COLOR_KEYS = ['milk', 'aqua', 'light', 'mint', 'teal', 'sun'];
+  const COLOR_UNIFORMS = { milk: 'cMilk', aqua: 'cAqua', light: 'cLight', mint: 'cMint', teal: 'cTeal', sun: 'cSun' };
+  const KEYS = DAY_KEYS.map((k) => {
+    const o = { t: k.t, hl: k.hl, spark: k.spark };
+    for (const c of COLOR_KEYS) o[c] = hexToVec3(k[c]);
+    return o;
+  });
+  const smooth = (x) => x * x * (3 - 2 * x);
+  const clamp01 = (x) => Math.max(0, Math.min(1, x));
+  const lerp = (a, b, f) => a + (b - a) * f;
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  let dayClock = 0;      // seconds into the current day (pauses while the tab is hidden)
+  let nightShown = false;
+  let waiting = true;    // before the first day: night and the start card
+  let sunAway = { x: 1, y: 0 };  // screen direction shadows fall
+
+  const dayU = () => Math.min(1, dayClock / DAY.seconds);
+
+  function applyDay() {
+    const u = dayU();
+
+    // Blend between the two keyframes around u
+    let a = KEYS[0], b = KEYS[0], f = 0;
+    if (u >= KEYS[KEYS.length - 1].t) {
+      a = b = KEYS[KEYS.length - 1];
+    } else {
+      for (let i = 0; i < KEYS.length - 1; i++) {
+        if (u >= KEYS[i].t && u < KEYS[i + 1].t) {
+          a = KEYS[i]; b = KEYS[i + 1];
+          f = smooth((u - a.t) / (b.t - a.t));
+          break;
+        }
+      }
+    }
+    for (const c of COLOR_KEYS) {
+      gl.uniform3f(uni[COLOR_UNIFORMS[c]], lerp(a[c][0], b[c][0], f), lerp(a[c][1], b[c][1], f), lerp(a[c][2], b[c][2], f));
+    }
+    gl.uniform1f(uni.uHighlight, lerp(a.hl, b.hl, f) * TUNE.highlight);
+    gl.uniform1f(uni.uSparkles, lerp(a.spark, b.spark, f) * TUNE.sparkles);
+
+    // The sun drifts in a soft arc; its light follows
+    const s = smooth(clamp01((u - SUN_PATH.rise) / (SUN_PATH.set - SUN_PATH.rise)));
+    const aspect = W / H;
+    const fx = lerp(SUN_PATH.xFrom, SUN_PATH.xTo, s);
+    const fy = SUN_PATH.yLow + (SUN_PATH.yHigh - SUN_PATH.yLow) * Math.sin(Math.PI * s);
+    gl.uniform2f(uni.uSunPos, fx * aspect, fy);
+    const dx = (fx - 0.5) * aspect, dy = fy - 0.5;
+    const len = Math.hypot(dx, dy) || 1;
+    gl.uniform2f(uni.uSunDir, dx / len, dy / len);
+    sunAway = { x: -dx / len, y: dy / len };
+
+    // Fade up from black at dawn, down to black at night
+    const fadeIn = smooth(clamp01(dayClock / DAY.fadeIn));
+    const fadeOut = 1 - smooth(clamp01((u - DAY.nightFrom) / (DAY.nightAt - DAY.nightFrom)));
+    gl.uniform1f(uni.uFade, waiting ? 0 : fadeIn * fadeOut);
+
+    // Mist burns off through the morning
+    const mistAmt = waiting ? 0 : 1 - smooth(clamp01((u - (EVENTS.mistUntil - 0.07)) / 0.11));
+    gl.uniform1f(uni.uMistAmt, mistAmt);
+    mistActive = mistAmt > 0.001;
+
+    // The closing card
+    if (!waiting) {
+      if (u >= DAY.nightAt && !nightShown) {
+        nightShown = true;
+        endEl.classList.add('show');
+      }
+      if (nightShown && dayClock >= DAY.seconds * DAY.nightAt + DAY.buttonDelay && !endEl.classList.contains('ready')) {
+        endEl.classList.add('ready');
+        againBtn.tabIndex = 0;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Events: mist, lone fish, sun shower, school of fish, bird
+  // ---------------------------------------------------------------------
+  let fish = [], school = null, bird = null;
+  let rain = 0, rainAcc = 0, mistActive = false, layersDirty = true;
+  let fishSpawned = 0, schoolDone = false, birdDone = false;
+
+  function resetMist() {
+    mctx.globalCompositeOperation = 'source-over';
+    mctx.clearRect(0, 0, mist.width, mist.height);
+    mctx.fillStyle = '#fff';
+    mctx.fillRect(0, 0, mist.width, mist.height);
+  }
+
+  function wipeMist(x, y, r) {
+    if (!mistActive) return;
+    const cx = x * MS, cy = y * MS, rr = r * MS;
+    const g = mctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+    g.addColorStop(0, 'rgba(0,0,0,0.55)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    mctx.globalCompositeOperation = 'destination-out';
+    mctx.fillStyle = g;
+    mctx.fillRect(cx - rr, cy - rr, rr * 2, rr * 2);
+    mctx.globalCompositeOperation = 'source-over';
+  }
+
+  function angleDiff(a, b) {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  // --- Fish shape (shared by the lone fish and the school) ---
+  function fishSpine(f) {
+    const N = 10, pts = [];
+    const ca = Math.cos(f.a), sa = Math.sin(f.a);
+    const v = Math.max(f.v, f.len * 0.4);
+    for (let i = 0; i <= N; i++) {
+      const s = i / N;
+      const along = -s * f.len;
+      let lat = Math.sin(f.phase - s * 3.2) * f.len * (0.02 * s + 0.08 * s * s);
+      lat += Math.max(-0.4, Math.min(0.4, (s * s * f.len * f.bend) / (2 * v))) * f.len;
+      pts.push({ x: f.x + ca * along - sa * lat, y: f.y + sa * along + ca * lat, s });
+    }
+    return pts;
+  }
+
+  function fishWidth(s, len) {
+    return len * 0.13 * (s < 0.3 ? Math.sqrt(0.15 + 0.85 * s / 0.3) : 1 - Math.pow((s - 0.3) / 0.7, 1.3) * 0.9);
+  }
+
+  // Body plus tail as one soft silhouette
+  function fishSilhouette(ctx, f) {
+    const pts = fishSpine(f), len = f.len;
+    const left = [], right = [];
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+      let tx = a.x - b.x, ty = a.y - b.y;
+      const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+      const w = fishWidth(pts[i].s, len);
+      left.push({ x: pts[i].x - ty * w, y: pts[i].y + tx * w });
+      right.push({ x: pts[i].x + ty * w, y: pts[i].y - tx * w });
+    }
+    ctx.beginPath();
+    ctx.moveTo(left[0].x, left[0].y);
+    for (let i = 1; i < left.length; i++) ctx.lineTo(left[i].x, left[i].y);
+    for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(right[i].x, right[i].y);
+    ctx.closePath();
+
+    // Tail
+    const e = pts[pts.length - 1], p = pts[pts.length - 2];
+    let tx = e.x - p.x, ty = e.y - p.y;
+    const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+    const nx = -ty, ny = tx;
+    const sw = Math.sin(f.phase - 3.4) * 0.04 * len, spread = len * 0.13;
+    ctx.moveTo(e.x, e.y);
+    ctx.lineTo(e.x + tx * len * 0.22 + nx * (spread + sw), e.y + ty * len * 0.22 + ny * (spread + sw));
+    ctx.lineTo(e.x + tx * len * 0.14 + nx * sw, e.y + ty * len * 0.14 + ny * sw);
+    ctx.lineTo(e.x + tx * len * 0.22 - nx * (spread - sw), e.y + ty * len * 0.22 - ny * (spread - sw));
+    ctx.closePath();
+  }
+
+  // Draw only a soft blurred shadow of a shape (the shape itself stays offscreen)
+  const OFF = 20000;
+  function softShadow(ctx, color, blur, ox, oy, pathFn) {
+    ctx.save();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = blur * LS;
+    ctx.shadowOffsetX = (OFF + ox) * LS;
+    ctx.shadowOffsetY = oy * LS;
+    ctx.translate(-OFF, 0);
+    ctx.fillStyle = '#000';
+    pathFn();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // A fish seen through the water: a fuzzy dark shape with a fainter shadow on the floor
+  function drawFish(ctx, f, alpha = 1) {
+    const so = f.len * 0.35;
+    softShadow(ctx, `rgba(40,96,106,${0.16 * alpha})`, f.len * (TUNE.fishSoftness + 0.14),
+               sunAway.x * so, sunAway.y * so, () => fishSilhouette(ctx, f));
+    softShadow(ctx, `rgba(30,78,90,${TUNE.fishShade * alpha})`, f.len * TUNE.fishSoftness,
+               0, 0, () => fishSilhouette(ctx, f));
+  }
+
+  function advanceFish(f, want, speed, turn, dt, accel) {
+    const da = Math.max(-turn * dt, Math.min(turn * dt, angleDiff(f.a, want)));
+    f.a += da;
+    const w = dt > 0 ? da / dt : 0;
+    f.bend += (w - f.bend) * Math.min(1, dt * 4);
+    f.v += (speed - f.v) * Math.min(1, dt * accel);
+    f.x += Math.cos(f.a) * f.v * dt;
+    f.y += Math.sin(f.a) * f.v * dt;
+    f.phase += dt * (2.5 + (f.v / f.len) * 4.5);
+  }
+
+  // --- Two lone fish in the morning ---
+  const LONE_FISH = [
+    { delay: 0, enter: [-0.08, 0.42], a: 0.1, len: 0.085,
+      path: [[0.35, 0.5], [0.6, 0.34], [0.72, 0.6], [0.46, 0.7], [0.3, 0.44], [0.56, 0.4]] },
+    { delay: 4.5, enter: [0.62, 1.08], a: -1.45, len: 0.07,
+      path: [[0.6, 0.62], [0.4, 0.36], [0.66, 0.28], [0.52, 0.66], [0.36, 0.55]] },
+  ];
+
+  function spawnFish(i) {
+    const unit = Math.max(W, H), cfg = LONE_FISH[i];
+    fish.push({
+      x: cfg.enter[0] * W, y: cfg.enter[1] * H, a: cfg.a, len: unit * cfg.len,
+      v: unit * 0.045, calm: unit * 0.048, phase: i * 2.1, bend: 0,
+      flee: 0, fleeA: 0, path: cfg.path, wpi: 0, wpTimer: 0,
+      nibble: 0.6, wake: 0, leaving: false,
+    });
+  }
+
+  function heldFinger(now) {
+    for (const p of pointers.values()) {
+      if (now - p.stillSince > 600) return p;
+    }
+    return null;
+  }
+
+  function updateFish(f, dt, u, now) {
+    const unit = Math.max(W, H);
+    const wp = f.path[f.wpi % f.path.length];
+    let tx = wp[0] * W, ty = wp[1] * H, speed = f.calm, turn = 1.1;
+    const hold = heldFinger(now);
+
+    if (u > EVENTS.fishUntil) f.leaving = true;
+
+    if (f.flee > 0) {
+      // Startled: dart away, then calm down
+      f.flee -= dt;
+      const k = Math.max(0, f.flee / 1.4);
+      speed = f.calm * (1 + 4.5 * k);
+      turn = 4.5;
+      tx = f.x + Math.cos(f.fleeA) * unit; ty = f.y + Math.sin(f.fleeA) * unit;
+    } else if (f.leaving) {
+      tx = f.x + Math.cos(f.a) * unit * 2; ty = f.y + Math.sin(f.a) * unit * 2;
+      speed = f.calm * 1.2;
+    } else if (hold && Math.hypot(hold.x - f.x, hold.y - f.y) < unit * 0.45) {
+      // Curious: swim up to a still finger and nibble
+      tx = hold.x; ty = hold.y;
+      const d = Math.hypot(hold.x - f.x, hold.y - f.y);
+      speed = d > f.len * 0.5 ? f.calm * 0.85 : f.calm * 0.12;
+      turn = 1.6;
+      if (d < f.len * 0.7) {
+        f.nibble -= dt;
+        if (f.nibble <= 0) {
+          f.nibble = 0.7;
+          disturb(f.x + Math.cos(f.a) * f.len * 0.05, f.y + Math.sin(f.a) * f.len * 0.05, unit * 0.006, 0.14);        }
+      }
+    } else {
+      // Follow a gentle path around the pond
+      f.wpTimer += dt;
+      if (Math.hypot(tx - f.x, ty - f.y) < f.len * 1.2 || f.wpTimer > 7) {
+        f.wpi++;
+        f.wpTimer = 0;
+      }
+    }
+
+    advanceFish(f, Math.atan2(ty - f.y, tx - f.x), speed, turn, dt, f.flee > 0 ? 5 : 1.5);
+
+    // A faint wake on the surface above
+    f.wake -= dt;
+    if (f.wake <= 0) {
+      f.wake = 0.22;
+      disturb(f.x, f.y, unit * 0.007, 0.018 * Math.min(1.5, f.v / f.calm));
+    }
+
+    const m = f.len * 1.6;
+    return !(f.leaving && (f.x < -m || f.x > W + m || f.y < -m || f.y > H + m));
+  }
+
+  // --- The school: a dozen fish crossing together, scattering and regrouping ---
+  // Slots in the formation, in fish lengths: x forward, y to the side.
+  const SCHOOL_SLOTS = [
+    [0, 0], [-1.2, 0.75], [-1.2, -0.75], [-2.4, 1.4], [-2.4, 0], [-2.4, -1.4],
+    [-3.6, 0.75], [-3.6, -0.75], [-3.7, 2.0], [-3.7, -2.0], [-4.8, 0.2], [-4.9, -1.3],
+  ];
+  const SCHOOL_PATH = { from: [-0.18, 0.68], to: [1.22, 0.30], bow: 0.10 };
+
+  function schoolLeader(k) {
+    const x = lerp(SCHOOL_PATH.from[0], SCHOOL_PATH.to[0], k) * W;
+    const y = (lerp(SCHOOL_PATH.from[1], SCHOOL_PATH.to[1], k) + Math.sin(k * Math.PI) * SCHOOL_PATH.bow) * H;
+    return { x, y };
+  }
+
+  function spawnSchool() {
+    const unit = Math.max(W, H);
+    const len = unit * 0.045;
+    const lead = schoolLeader(0), next = schoolLeader(0.01);
+    const a = Math.atan2(next.y - lead.y, next.x - lead.x);
+    const members = [];
+    const n = Math.min(EVENTS.schoolCount, SCHOOL_SLOTS.length);
+    for (let i = 0; i < n; i++) {
+      const [ox, oy] = SCHOOL_SLOTS[i];
+      const sx = lead.x + (Math.cos(a) * ox - Math.sin(a) * oy) * len * 1.15;
+      const sy = lead.y + (Math.sin(a) * ox + Math.cos(a) * oy) * len * 1.15;
+      members.push({ x: sx, y: sy, a, len: len * (0.9 + (i % 3) * 0.07), v: 0, vx: 0, vy: 0,
+                     phase: i * 1.37, bend: 0, slot: i });
+    }
+    school = { t: 0, members, len };
+  }
+
+  function updateSchool(dt, T) {
+    const s = school;
+    s.t += dt;
+    const k = s.t / EVENTS.schoolSeconds;
+    const lead = schoolLeader(k), next = schoolLeader(k + 0.01);
+    const la = Math.atan2(next.y - lead.y, next.x - lead.x);
+    const lvx = (next.x - lead.x) / (0.01 * EVENTS.schoolSeconds);
+    const lvy = (next.y - lead.y) / (0.01 * EVENTS.schoolSeconds);
+    const ca = Math.cos(la), sa = Math.sin(la);
+
+    for (const f of s.members) {
+      const [ox, oy] = SCHOOL_SLOTS[f.slot];
+      const wob = Math.sin(T * 0.6 + f.slot * 1.7) * 0.25;
+      const tx = lead.x + (ca * ox - sa * (oy + wob)) * s.len * 1.15;
+      const ty = lead.y + (sa * ox + ca * (oy + wob)) * s.len * 1.15;
+      // Steer back into formation: match the school's pace, plus a gentle pull toward the slot
+      const dvx = lvx + (tx - f.x) * 0.9 - f.vx;
+      const dvy = lvy + (ty - f.y) * 0.9 - f.vy;
+      const g = Math.min(1, dt * 1.8);
+      f.vx += dvx * g; f.vy += dvy * g;
+      f.x += f.vx * dt; f.y += f.vy * dt;
+
+      const sp = Math.hypot(f.vx, f.vy);
+      const want = sp > 4 ? Math.atan2(f.vy, f.vx) : la;
+      const da = Math.max(-3 * dt, Math.min(3 * dt, angleDiff(f.a, want)));
+      f.a += da;
+      f.bend += ((dt > 0 ? da / dt : 0) - f.bend) * Math.min(1, dt * 4);
+      f.v = sp;
+      f.phase += dt * (2.5 + (sp / f.len) * 4.5);
+    }
+    if (k > 1.15) school = null;
+  }
+
+  // --- Bird shadow ---
+  function spawnBird() {
+    const span = Math.max(W, H) * 0.15;
+    bird = { x0: -span, y0: H * 0.22, x1: W + span, y1: H * 0.78, t: 0, dur: EVENTS.birdSeconds, span };
+  }
+
+  function drawBird(ctx, T) {
+    const b = bird;
+    const k = b.t / b.dur;
+    const x = lerp(b.x0, b.x1, k), y = lerp(b.y0, b.y1, k) + Math.sin(k * Math.PI) * b.span * 0.3;
+    const a = Math.atan2(b.y1 - b.y0, b.x1 - b.x0);
+    const s = b.span;
+    // Mostly gliding, with a few slow wingbeats
+    const beat = Math.max(0, Math.sin(T * 0.9 + 1.0));
+    const flap = Math.sin(T * 7) * beat;
+    const wing = 0.5 * (0.88 + 0.12 * flap);
+    softShadow(ctx, 'rgba(35,82,94,0.30)', s * 0.10, x, y, () => {
+      ctx.save();
+      ctx.rotate(a);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, s * 0.17, s * 0.035, 0, 0, Math.PI * 2);
+      for (const side of [-1, 1]) {
+        ctx.moveTo(s * 0.06, 0);
+        ctx.quadraticCurveTo(s * 0.07, side * s * 0.24, -s * 0.03 + flap * s * 0.03, side * s * wing);
+        ctx.quadraticCurveTo(-s * 0.06, side * s * 0.2, -s * 0.09, 0);
+      }
+      ctx.moveTo(-s * 0.14, 0);
+      ctx.lineTo(-s * 0.24, s * 0.045);
+      ctx.lineTo(-s * 0.24, -s * 0.045);
+      ctx.closePath();
+      ctx.restore();
+    });
+  }
+
+  // --- Running the day's events ---
+  function updateEvents(dt, u, now, T) {
+    const unit = Math.max(W, H);
+
+    if (!waiting) {
+      // Lone fish
+      if (fishSpawned < LONE_FISH.length && u >= EVENTS.fishFrom && u < EVENTS.fishUntil - 0.05) {
+        if (dayClock >= EVENTS.fishFrom * DAY.seconds + LONE_FISH[fishSpawned].delay) spawnFish(fishSpawned++);
+      }
+
+      // Sun shower
+      const rs = (dayClock - EVENTS.showerAt * DAY.seconds) / EVENTS.showerSeconds;
+      rain = rs > 0 && rs < 1 ? Math.pow(Math.sin(Math.PI * rs), 0.7) : 0;
+      if (rain > 0) {
+        rainAcc += dt * 45 * rain;
+        while (rainAcc >= 1) {
+          rainAcc -= 1;
+          const rx = W * rand(0.03, 0.97);
+          disturb(rx, H * rand(0.03, 0.97), unit * rand(0.004, 0.007), rand(0.15, 0.32));        }
+      }
+
+      // School of fish
+      if (!schoolDone && u >= EVENTS.schoolAt) { schoolDone = true; spawnSchool(); }
+
+      // Bird
+      if (!birdDone && u >= EVENTS.birdAt) { birdDone = true; spawnBird(); }
+    }
+
+    fish = fish.filter((f) => updateFish(f, dt, u, now));
+    if (school) updateSchool(dt, T);
+    if (bird) { bird.t += dt; if (bird.t > bird.dur) bird = null; }
+
+    // Mist slowly closes back over wiped spots
+    if (mistActive) {
+      mctx.fillStyle = 'rgba(255,255,255,0.012)';
+      mctx.fillRect(0, 0, mist.width, mist.height);
+    }
+  }
+
+  let underWasEmpty = true;
+  function drawLayers(T) {
+    const underHas = fish.length > 0 || !!school || !!bird;
+    if (underHas || !underWasEmpty || layersDirty) {
+      uctx.setTransform(1, 0, 0, 1, 0, 0);
+      uctx.clearRect(0, 0, under.width, under.height);
+      uctx.setTransform(LS, 0, 0, LS, 0, 0);
+      for (const f of fish) drawFish(uctx, f);
+      if (school) for (const f of school.members) drawFish(uctx, f, 0.85);
+      if (bird) drawBird(uctx, T);
+      if (underHas) {
+        uploadCanvas(1, underTex, under);
+      } else {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, underTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+      }
+      underWasEmpty = !underHas;
+    }
+    if (mistActive || layersDirty) uploadCanvas(3, mistTex, mist);
+    layersDirty = false;
+    gl.uniform1f(uni.uRain, rain);
+  }
+
+  // A touch scatters the school
+  function nudge(x, y, radius, power) {
+    if (school) {
+      for (const f of school.members) {
+        const dx = f.x - x, dy = f.y - y, d = Math.hypot(dx, dy);
+        if (d < radius * 1.4 && d > 0.001) {
+          const k = power * 2.2 * (1 - d / (radius * 1.4));
+          f.vx += dx / d * k; f.vy += dy / d * k;
+        }
+      }
+    }
+  }
+
+  function startle(x, y, radius) {
+    for (const f of fish) {
+      const cx = f.x - Math.cos(f.a) * f.len * 0.4, cy = f.y - Math.sin(f.a) * f.len * 0.4;
+      const d = Math.hypot(cx - x, cy - y);
+      if (d < radius && f.flee <= 0.3) {
+        f.flee = 1.4;
+        f.fleeA = Math.atan2(cy - y, cx - x) + rand(-0.4, 0.4);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Sound: the quiet of shallow water and birdsong (all made here, nothing to download)
+  // ---------------------------------------------------------------------
+  let actx = null, master = null, fxBus = null, hushGain = null;
+  let noiseBuf = null;
+  let muted = false;
+  const laps = [];
+  let nextBirdAt = 2.5;
+
+  const audioOn = () => actx && actx.state === 'running';
+
+  function noiseBuffer(seconds) {
+    const len = Math.floor(actx.sampleRate * seconds);
+    const buf = actx.createBuffer(2, len, actx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = buf.getChannelData(ch);
+      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+      for (let i = 0; i < len; i++) {
+        // pink noise
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759;
+        b2 = 0.96900 * b2 + w * 0.1538520; b3 = 0.86650 * b3 + w * 0.3104856;
+        b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+        d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11;
+        b6 = w * 0.115926;
+      }
+      // Fade the ends together so the loop doesn't click
+      const fade = Math.floor(actx.sampleRate * 0.05);
+      for (let i = 0; i < fade; i++) {
+        const k = i / fade;
+        d[i] *= k; d[len - 1 - i] *= k;
+      }
+    }
+    return buf;
+  }
+
+  function loopSource(buffer, offset) {
+    const src = actx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.start(0, offset);
+    return src;
+  }
+
+  function initAudio() {
+    if (actx) { actx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    actx = new AC();
+    const now = actx.currentTime;
+
+    master = actx.createGain();
+    master.gain.value = 0;
+    master.connect(actx.destination);
+    master.gain.setTargetAtTime(muted ? 0 : SOUND.volume, now, 1.2);
+
+    // Birds (dry, no echo)
+    fxBus = actx.createGain();
+    fxBus.connect(master);
+
+    noiseBuf = noiseBuffer(6);
+
+    // The quiet hush of shallow water
+    const hush = loopSource(noiseBuf, 0);
+    const hushBp = actx.createBiquadFilter(); hushBp.type = 'bandpass'; hushBp.frequency.value = 1000; hushBp.Q.value = 0.7;
+    const hushLp = actx.createBiquadFilter(); hushLp.type = 'lowpass'; hushLp.frequency.value = 2200;
+    hushGain = actx.createGain(); hushGain.gain.value = 0;
+    hush.connect(hushBp).connect(hushLp).connect(hushGain).connect(master);
+
+    // Little laps of water at the edges, left and right
+    for (let i = 0; i < 2; i++) {
+      const src = loopSource(noiseBuf, 1.3 + i * 2.2);
+      const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 650; bp.Q.value = 1.2;
+      const g = actx.createGain(); g.gain.value = 0;
+      src.connect(bp).connect(g);
+      connectPanned(g, i === 0 ? -0.45 : 0.45, master);
+      laps.push({ bp, g, next: now + 1 + i * 1.7 });
+    }
+
+  }
+
+  function connectPanned(node, pan, dest) {
+    if (actx.createStereoPanner) {
+      const p = actx.createStereoPanner(); p.pan.value = pan;
+      node.connect(p).connect(dest);
+    } else {
+      node.connect(dest);
+    }
+  }
+
+  // One bird note: a quick sine glide from f0 to f1
+  function chirp(t, f0, f1, dur, vol, pan) {
+    const o = actx.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = actx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+    g.gain.setValueAtTime(vol, t + dur * 0.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g);
+    connectPanned(g, pan, fxBus);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  // A short phrase from one of three little birds somewhere around the pond
+  function birdPhrase() {
+    const t = actx.currentTime + 0.05;
+    const pan = rand(-0.75, 0.75), k = rand(0.9, 1.1);
+    const vol = 0.045 * SOUND.birds * rand(0.6, 1);
+    const kind = Math.floor(Math.random() * 3);
+    if (kind === 0) {        // "tsip tsip tsip"
+      const n = 2 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) chirp(t + i * 0.13, 4300 * k, 5400 * k, 0.05, vol, pan);
+    } else if (kind === 1) { // "tee-oo"
+      chirp(t, 3100 * k, 3500 * k, 0.13, vol, pan);
+      chirp(t + 0.2, 2900 * k, 2100 * k, 0.22, vol, pan);
+    } else {                 // a soft trill
+      const n = 7 + Math.floor(Math.random() * 4);
+      for (let i = 0; i < n; i++) chirp(t + i * 0.055, 3800 * k - i * 40, 3200 * k - i * 40, 0.035, vol * 0.8, pan);
+    }
+  }
+
+  // How busy the birds are through the day (0 = silent)
+  const BIRD_ACTIVITY = [[0, 0.3], [0.06, 1.0], [0.25, 0.9], [0.45, 0.45], [0.65, 0.55], [0.8, 0.3], [0.86, 0]];
+  function birdActivity(u) {
+    for (let i = 0; i < BIRD_ACTIVITY.length - 1; i++) {
+      const [a, va] = BIRD_ACTIVITY[i], [b, vb] = BIRD_ACTIVITY[i + 1];
+      if (u >= a && u <= b) return lerp(va, vb, (u - a) / (b - a));
+    }
+    return 0;
+  }
+
+  function updateAudio(u) {
+    if (!audioOn()) return;
+    const now = actx.currentTime;
+    // The water is quiet at dawn, settles in through the day, and softens at night
+    const level = waiting ? 0 : smooth(clamp01(dayClock / 3)) * lerp(1, 0.4, smooth(clamp01((u - 0.86) / 0.09)));
+    hushGain.gain.setTargetAtTime(0.02 * SOUND.water * level, now, 0.8);
+
+    // Laps
+    for (const l of laps) {
+      if (l.next > now + 0.3) continue;
+      const t = Math.max(now, l.next);
+      l.g.gain.setTargetAtTime(rand(0.03, 0.07) * SOUND.water * level, t, 0.12);
+      l.g.gain.setTargetAtTime(0, t + rand(0.25, 0.45), 0.35);
+      l.bp.frequency.setTargetAtTime(rand(450, 900), t, 0.1);
+      l.next = t + rand(1.4, 3.6);
+    }
+
+    // Birds
+    if (!waiting && dayClock >= nextBirdAt) {
+      const a = birdActivity(u);
+      if (a > 0.05 && Math.random() < a) birdPhrase();
+      nextBirdAt = dayClock + rand(2.5, 6);
+    }
+  }
+
+  function setMuted(m) {
+    muted = m;
+    soundBtn.classList.toggle('muted', m);
+    soundBtn.setAttribute('aria-label', m ? 'Turn sound on' : 'Mute sound');
+    if (actx) master.gain.setTargetAtTime(m ? 0 : SOUND.volume, actx.currentTime, 0.3);
+  }
+  soundBtn.addEventListener('click', () => setMuted(!muted));
+  window.addEventListener('keydown', (e) => { if (e.key === 'm' || e.key === 'M') setMuted(!muted); });
+  document.addEventListener('visibilitychange', () => {
+    if (!actx) return;
+    if (document.hidden) actx.suspend(); else actx.resume();
+  });
+
+  // ---------------------------------------------------------------------
+  // Starting and restarting the day
+  // ---------------------------------------------------------------------
+  // Fade a card out gently, then reset it once it's invisible
+  function hideCard(el) {
+    if (!el.classList.contains('show') || el.classList.contains('leaving')) return;
+    el.classList.add('leaving');
+    setTimeout(() => el.classList.remove('show', 'ready', 'leaving'), 3200);
+  }
+
+  function newDay() {
+    dayClock = 0;
+    nightShown = false;
+    hideCard(endEl);
+    againBtn.tabIndex = -1;
+    againBtn.blur();
+    fish = []; school = null; bird = null; rain = 0; rainAcc = 0;
+    fishSpawned = 0; schoolDone = false; birdDone = false;
+    nextBirdAt = 2.5;
+    resetMist();
+    layersDirty = true;
+    firstDrop = true;
+    nextDrop = performance.now() + 1500;
+  }
+  againBtn.addEventListener('click', newDay);
+
+  // Before the first day: the night card
+  function startFirstDay() {
+    if (!waiting) return;
+    waiting = false;
+    hideCard(startEl);
+    startBtn.tabIndex = -1;
+    soundBtn.hidden = false;
+    initAudio();
+    newDay();
+  }
+  startBtn.addEventListener('click', startFirstDay);
+  requestAnimationFrame(() => {
+    startEl.classList.add('show');
+    setTimeout(() => { startEl.classList.add('ready'); startBtn.tabIndex = 0; }, 900);
+  });
+
+  // ---------------------------------------------------------------------
+  // Touch & mouse (works all day long, even as night falls)
+  // ---------------------------------------------------------------------
+  const pointers = new Map();
+  let lastTouch = performance.now();
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (waiting) { startFirstDay(); return; }   // tapping anywhere starts the first day
+    if (endEl.classList.contains('ready')) { newDay(); return; }   // ...and the next one
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+    const now = performance.now();
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: e.timeStamp, carry: 0, speed: 0, stillSince: now });
+    const unit = Math.max(W, H);
+    disturb(e.clientX, e.clientY, TUNE.tapRadius * unit, TUNE.tapStrength);
+    startle(e.clientX, e.clientY, unit * 0.2);
+    nudge(e.clientX, e.clientY, unit * 0.18, unit * 0.16);
+    wipeMist(e.clientX, e.clientY, unit * 0.06);
+    lastTouch = now;
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    const p = pointers.get(e.pointerId);
+    if (!p) return;
+    // A mouse with no button held isn't touching the water (its release was missed)
+    if (e.pointerType === 'mouse' && e.buttons === 0) { pointers.delete(e.pointerId); return; }
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 0.5) return;
+    const now = performance.now();
+    if (dist > 3) p.stillSince = now;
+
+    const unit = Math.max(W, H);
+    const dt = Math.max(1, e.timeStamp - p.t);
+    p.speed = p.speed * 0.7 + (dist / dt) * 0.3;               // px per ms, smoothed
+    const speedNorm = Math.min(1.5, p.speed / (unit * 0.0015));
+    const strength = TUNE.dragStrength * (1 + TUNE.dragSpeedBoost * speedNorm);
+    const radius = TUNE.dragRadius * unit;
+    const spacing = radius * 0.5;
+
+    // Lay soft stamps at even spacing along the path so the wake stays smooth
+    let d = spacing - p.carry;
+    while (d <= dist) {
+      const f = d / dist;
+      const sx = p.x + dx * f, sy = p.y + dy * f;
+      disturb(sx, sy, radius, strength);
+      nudge(sx, sy, unit * 0.07, unit * 0.02);
+      wipeMist(sx, sy, unit * 0.05);
+      d += spacing;
+    }
+    p.carry = dist - (d - spacing);
+    if (speedNorm > 0.5) startle(e.clientX, e.clientY, unit * 0.12);
+    p.x = e.clientX; p.y = e.clientY; p.t = e.timeStamp;
+    lastTouch = now;
+  });
+
+  const release = (e) => pointers.delete(e.pointerId);
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
+  canvas.addEventListener('lostpointercapture', release);
+  window.addEventListener('blur', () => pointers.clear());
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ---------------------------------------------------------------------
+  // Idle life: a soft first ripple, then a rare faint drop
+  // ---------------------------------------------------------------------
+  let nextDrop = performance.now() + 1500;
+  let firstDrop = true;
+
+  function maybeDrop(now) {
+    if (waiting || !TUNE.ambientDrops || reduceMotion || now < nextDrop) return;
+    nextDrop = now + 8000 + Math.random() * 9000;
+    if (pointers.size || now - lastTouch < 4000) return;
+    const unit = Math.max(W, H);
+    if (firstDrop) {
+      disturb(W * 0.5, H * 0.45, TUNE.tapRadius * unit, 0.6);
+      firstDrop = false;
+    } else {
+      disturb(W * (0.15 + Math.random() * 0.7), H * (0.15 + Math.random() * 0.7),
+              TUNE.tapRadius * unit * 0.6, 0.25);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Loop
+  // ---------------------------------------------------------------------
+  let last = performance.now(), acc = 0;
+  const t0 = last;
+  const timeScale = reduceMotion ? 0.3 : 1;
+  const frameGap = 1000 / Math.max(1, TUNE.fps);
+  let nextDraw = last;
+
+  function frame(now) {
+    // Hold each drawn frame until the next one is due (TUNE.fps)
+    if (now < nextDraw - 1) { requestAnimationFrame(frame); return; }
+    nextDraw = Math.max(nextDraw + frameGap, now - frameGap);
+
+    const dt = Math.min(0.2, (now - last) / 1000);
+    last = now;
+    if (!waiting) dayClock = Math.min(dayClock + dt, DAY.seconds + 30);
+    const u = dayU();
+    const T = (now - t0) / 1000;
+
+    maybeDrop(now);
+    updateEvents(dt, u, now, T);
+    updateAudio(u);
+
+    // The water keeps real-time pace however few frames are drawn
+    acc += dt;
+    const stepDt = 1 / TUNE.stepsPerSecond;
+    const maxSteps = Math.ceil(0.2 / stepDt);
+    let stepped = false, n = 0;
+    while (acc >= stepDt && n < maxSteps) {
+      if (!asleep) { step(); stepped = true; }
+      acc -= stepDt;
+      n++;
+    }
+    if (n === maxSteps) acc = 0;
+    if (stepped) upload();
+
+    applyDay();
+    drawLayers(T);
+    gl.uniform1f(uni.uTime, (T * timeScale) % 3600);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(frame);
+  }
+
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 120);
+  });
+
+  canvas.addEventListener('webglcontextlost', (e) => e.preventDefault());
+  canvas.addEventListener('webglcontextrestored', () => { if (initGL()) resize(); });
+
+  if (!initGL()) return;
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
