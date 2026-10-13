@@ -1,5 +1,7 @@
 # A Day in the Water
 
+https://edwinychoi.github.io/2026-day-in-the-water/
+
 A calm, two-minute day on a pale, painterly pond. There are no goals or scores: touch the water, watch it ripple, and let the day pass from dawn to night.
 
 ## Play
