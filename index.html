@@ -271,10 +271,14 @@
     uniform vec3  cMilk, cAqua, cLight, cMint, cTeal, cSun;
     varying vec2 vUv;
 
+    // Phone GPUs round floats differently from desktops. A hash built on big float multipliers
+    // turns that rounding into a different value on each side of a noise cell: hard seams that
+    // cut the water into blocks. This one only does whole-number maths below 2^24, which every
+    // GPU does exactly, so neighbouring cells always agree.
+    float permute(float x) { return mod((x * 34.0 + 1.0) * x, 289.0); }
     float hash(vec2 p) {
-      p = fract(p * vec2(123.34, 456.21));
-      p += dot(p, p + 45.32);
-      return fract(p.x * p.y);
+      p = mod(floor(p), 289.0);
+      return permute(permute(p.x) + p.y) / 289.0;
     }
     float noise(vec2 p) {
       vec2 i = floor(p), f = fract(p);
